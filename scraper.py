@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 import os
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins="*", methods=["GET", "OPTIONS"])
 
 ADRESSES = {
     "Immeubles Assafa": "Près du café KENYA, Hay Al Moammadi, Agadir",
