@@ -3,6 +3,7 @@ from flask_cors import CORS
 import requests
 from bs4 import BeautifulSoup
 import os
+import re
 
 app = Flask(__name__)
 CORS(app, origins="*")
@@ -10,64 +11,62 @@ CORS(app, origins="*")
 @app.route('/pharmacies')
 def get_pharmacies():
     try:
-        url = "https://agadir.pharmacieenpermanence.ma/"
+        url = "https://pharmacie.omnidoc.ma/liste-des-villes/AGADIR"
         headers = {'User-Agent': 'Mozilla/5.0'}
         r = requests.get(url, headers=headers, timeout=10)
         r.encoding = 'utf-8'
         soup = BeautifulSoup(r.text, 'html.parser')
 
         pharmacies = []
+        for h2 in soup.find_all('h2'):
+            a = h2.find('a')
+            if not a: continue
 
-        # Chercher toutes les pharmacies dans la page
-        cards = soup.find_all('div', class_=lambda x: x and 'pharmacie' in x.lower())
-        if not cards:
-            cards = soup.find_all('article')
-        if not cards:
-            cards = soup.find_all('div', class_=lambda x: x and 'card' in x.lower())
+            full_name = a.text.strip()
+            name = full_name.split(' - ')[0].strip()
+            href = a.get('href', '')
 
-        for card in cards:
-            name = ''
-            address = ''
-            phone = ''
             lat, lng = None, None
-
-            # Nom
-            h = card.find(['h1','h2','h3','h4','strong'])
-            if h:
-                name = h.get_text(strip=True)
-
-            # Téléphone
-            tel = card.find('a', href=lambda x: x and 'tel:' in x)
-            if tel:
-                phone = tel.get('href','').replace('tel:','').strip()
+            if 'lat=' in href:
+                try:
+                    lat = float(href.split('lat=')[1].split('&')[0])
+                    lng = float(href.split('lng=')[1])
+                except: pass
 
             # Adresse
-            p = card.find('p')
-            if p:
-                address = p.get_text(strip=True)
+            parent = h2.find_parent()
+            address = 'Agadir'
+            if parent:
+                p = parent.find('p')
+                if p:
+                    address = p.get_text(strip=True)
+
+            # Téléphone
+            tel_tag = h2.find_next('a', href=lambda x: x and 'tel:' in x)
+            phone = ''
+            if tel_tag:
+                phone = tel_tag.get('href', '').replace('tel:', '').strip()
 
             # GPS depuis lien Google Maps
-            gmap = card.find('a', href=lambda x: x and 'maps' in str(x))
-            if gmap:
-                href = gmap.get('href','')
-                if 'destination=' in href:
-                    try:
-                        coords = href.split('destination=')[1].split('&')[0]
-                        lat, lng = map(float, coords.split(','))
-                    except: pass
+            if not lat:
+                gmap = h2.find_next('a', href=lambda x: x and 'google.com/maps' in str(x))
+                if gmap:
+                    gmap_href = gmap.get('href', '')
+                    if 'destination=' in gmap_href:
+                        try:
+                            coords = gmap_href.split('destination=')[1].split('&')[0]
+                            lat, lng = map(float, coords.split(','))
+                        except: pass
 
-            if name and len(name) > 2:
+            if name and lat:
                 pharmacies.append({
-                    'name': name if 'Pharmacie' in name else 'Pharmacie ' + name,
-                    'address': address or 'Agadir',
+                    'name': 'Pharmacie ' + name,
+                    'address': address,
                     'phone': phone,
-                    'lat': lat or 30.4202,
-                    'lng': lng or -9.5992,
+                    'lat': lat,
+                    'lng': lng,
                     'h24': False
                 })
-
-        if not pharmacies:
-            return jsonify({'status': 'error', 'message': 'No pharmacies found'})
 
         return jsonify({'status': 'ok', 'data': pharmacies})
     except Exception as e:
